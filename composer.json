@@ -71,10 +71,19 @@
         "console": [
             "php tests/Fixtures/Symfony/app/console --ansi"
         ],
-        "analyse": [
-            "phpstan analyze src -l 7 --ansi",
-            "phpstan analyze tests -l 4 -c phpstan.tests.neon --ansi",
+        "static-analyse-src": [
+            "phpstan analyze src -l 7 --ansi"
+        ],
+        "static-analyse-tests": [
+            "phpstan analyze tests -l 4 -c phpstan.tests.neon --ansi"
+        ],
+        "cs-analyse": [
             "php-cs-fixer fix -v --dry-run --diff --stop-on-violation --ansi"
+        ],
+        "analyse": [
+            "@static-analyse-src",
+            "@static-analyse-tests",
+            "@cs-analyse"
         ],
         "test": [
             "@analyse",
@@ -84,7 +93,7 @@
             "phpunit --coverage-php cov/unit-test.cov --colors=always"
         ],
         "merge-code-coverage": [
-            "phpcov merge cov --clover clover.xml"
+            "phpcov merge cov --clover=clover.xml"
         ],
         "fix": "php-cs-fixer fix -v --ansi",
         "phpunit": [

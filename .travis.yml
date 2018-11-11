@@ -1,75 +1,89 @@
-language: php
-
-cache:
-  directories:
-    - $HOME/.composer/cache
-    - $HOME/pecl_cache
+dist: xenial
+language: bash
+services:
+  - docker
 
 env:
   global:
-    - COMPOSER_ARGS=install
-    - SWOOLE_VERSION=4.2.12
+    DOCKER_COMPOSE_VERSION: 1.23.2
+    DOCKER_BUILD_STAGES: >-
+      "ext-builder
+      ext-inotify
+      ext-pcntl
+      ext-xdebug
+      ext-swoole
+      app-installer
+      base
+      base-with-xdebug
+      base-cli
+      base-server
+      base-coverage
+      base-server-coverage
+      cli
+      composer
+      composer-coverage
+      server
+      server-coverage"
 
-matrix:
-  include:
-    - php: "7.2"
-      before_script:
-        - >-
-          curl -L
-          https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64
-          > ./cc-test-reporter
-        - chmod +x ./cc-test-reporter
-        - ./cc-test-reporter before-build
-      after_success:
-        - composer merge-code-coverage
-        - ./cc-test-reporter after-build -t clover --exit-code $TRAVIS_TEST_RESULT
-      env:
-        - COVERAGE=1
-        - DEPLOY=1
-    - php: "7.2"
-      env:
-        - "COMPOSER_ARGS='update --prefer-lowest'"
-    - php: "7.2"
-    - php: "7.3"
-    - php: "7.3"
-      env:
-        - SWOOLE_LATEST=1
-        - COMPOSER_ARGS=update
+# matrix:
+#   allow_failures:
+#     - php: "7.3"
+#   include:
+#     - php: "7.2"
+#       before_script:
+#         - >-
+#           curl -L
+#           https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64
+#           > ./cc-test-reporter
+#         - chmod +x ./cc-test-reporter
+#         - ./cc-test-reporter before-build
+#       after_success:
+#         - composer merge-code-coverage
+#         - ./cc-test-reporter after-build -t clover --exit-code $TRAVIS_TEST_RESULT
+#       env:
+#         - COVERAGE=1
+#         - DEPLOY=1
 
 before_install:
-  - export PATH="$PATH:$HOME/.composer/vendor/bin"
-  - composer global require phwoolcon/ci-pecl-cacher
-  - pecl update-channels
-  - ci-pecl-install inotify
-  - >-
-    if [[ "$SWOOLE_LATEST" = "1" ]]; then
-      ci-pecl-install swoole;
-    else
-      ci-pecl-install swoole-$SWOOLE_VERSION swoole skip-update;
-    fi
-  - php -r "echo swoole_version().PHP_EOL;"
-
-install:
-  - export COMPOSER_ARGS="$COMPOSER_ARGS --prefer-dist --no-progress --no-suggest --no-scripts --ansi"
-  - echo "composer $COMPOSER_ARGS"
-  - composer $COMPOSER_ARGS
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+  - sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+  - sudo apt-get update
+  - sudo apt-get -y -o Dpkg::Options::="--force-confnew" install docker-ce
+  - docker --version
+  - sudo rm /usr/local/bin/docker-compose
+  - curl -L "https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-$(uname -s)-$(uname -m)" > docker-compose
+  - chmod +x docker-compose
+  - sudo mv docker-compose /usr/local/bin
+  - docker-compose --version
 
 script:
-  - composer validate
-  - 'if [[ "$COVERAGE" != "1" ]]; then composer test; fi'
-  - 'if [[ "$COVERAGE" == "1" ]]; then composer analyse; fi'
-  - 'if [[ "$COVERAGE" == "1" ]]; then composer code-coverage; fi'
-  - bash ./tests/run-server-tests.sh
+  - docker-compose pull --include-deps composer
+  - docker-compose build composer
+  - docker-compose run composer cs-analyse
+  - docker-compose run composer static-analyse-src
+  - docker-compose run composer static-analyse-tests
+  - docker-compose run composer phpunit
 
-before_deploy:
-  - >-
-    export VERSION=$(git tag -l | sort -V -r | head -1 | sed -E 's/v(.*)/\1/') && echo "VERSION=${VERSION}"
-  - yarn global add conventional-changelog-cli conventional-recommended-bump conventional-github-releaser
+  - docker-compose pull --include-deps server
+  - docker-compose build server
+  - docker-compose run server
 
-deploy:
-  - provider: script
-    skip_cleanup: true
-    script: bash ./deploy/releaser.sh
-    on:
-      branch: master
-      condition: $DEPLOY = 1
+after_success:
+  - |
+    if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then
+      echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin;
+      docker-compose push --ignore-push-failures;
+    fi
+
+# before_deploy:
+#   - >-
+#     export VERSION=$(git tag -l | sort -V -r | head -1 | sed -E 's/v(.*)/\1/') && echo "VERSION=${VERSION}"
+#   - yarn global add conventional-changelog-cli conventional-recommended-bump conventional-github-releaser
+
+# deploy:
+#   - provider: script
+#     skip_cleanup: true
+#     script: bash ./deploy/releaser.sh
+#     on:
+#       branch: master
+#       condition: $DEPLOY = 1
