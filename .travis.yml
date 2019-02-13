@@ -6,24 +6,28 @@ services:
 env:
   global:
     DOCKER_COMPOSE_VERSION: 1.23.2
-    DOCKER_BUILD_STAGES: >-
-      "ext-builder
-      ext-inotify
-      ext-pcntl
-      ext-xdebug
-      ext-swoole
-      app-installer
-      base
-      base-with-xdebug
-      base-cli
-      base-server
-      base-coverage
-      base-server-coverage
-      cli
-      composer
-      composer-coverage
-      server
-      server-coverage"
+    # DOCKER_BUILD_STAGES: >-
+    #   "ext-builder
+    #   ext-inotify
+    #   ext-pcntl
+    #   ext-xdebug
+    #   ext-swoole
+    #   app-installer
+    #   base
+    #   base-with-xdebug
+    #   base-cli
+    #   base-server
+    #   base-coverage
+    #   base-server-coverage
+    #   cli
+    #   composer
+    #   composer-coverage
+    #   server
+    #   server-coverage"
+    PHP_VERSION: 7.2
+    ALPINE_VERSION: 3.8
+    SWOOLE_VERSION: 4.2.13
+    COMPOSER_ARGS: install
 
 # matrix:
 #   allow_failures:
@@ -57,16 +61,18 @@ before_install:
   - docker-compose --version
 
 script:
-  - docker-compose pull --include-deps composer
-  - docker-compose build composer
-  - docker-compose run composer cs-analyse
-  - docker-compose run composer static-analyse-src
-  - docker-compose run composer static-analyse-tests
-  - docker-compose run composer phpunit
+  # - export CURRENT_BUILD_METADATA="php-$PHP_VERSION-swoole-$SWOOLE_VERSION"
+  - export PUBLISH_BUILD_METADATA="php-$PHP_VERSION"
+  - export CACHE_METADATA="$PUBLISH_BUILD_METADATA"
+  - export BUILD_METADATA="$PUBLISH_BUILD_METADATA"
 
-  - docker-compose pull --include-deps server
-  - docker-compose build server
-  - docker-compose run server
+  - docker-compose pull --ignore-pull-failures
+  - docker-compose build
+  - docker-compose run --no-deps composer cs-analyse
+  - docker-compose run --no-deps composer static-analyse-src
+  - docker-compose run --no-deps composer static-analyse-tests
+  - docker-compose run --no-deps composer phpunit
+  - docker-compose run --no-deps server
 
 after_success:
   - |
