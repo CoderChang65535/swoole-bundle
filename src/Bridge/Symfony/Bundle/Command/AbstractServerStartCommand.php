@@ -9,6 +9,7 @@ use K911\Swoole\Common\XdebugHandler\XdebugHandler;
 use function K911\Swoole\decode_string_as_set;
 use function K911\Swoole\format_bytes;
 use function K911\Swoole\get_max_memory;
+use K911\Swoole\Server\Config\Socket;
 use K911\Swoole\Server\Configurator\ConfiguratorInterface;
 use K911\Swoole\Server\HttpServer;
 use K911\Swoole\Server\HttpServerConfiguration;
@@ -71,13 +72,16 @@ abstract class AbstractServerStartCommand extends Command
      */
     protected function configure(): void
     {
-        $defaultSocket = $this->serverConfiguration->getDefaultSocket();
-        $this->addOption('host', null, InputOption::VALUE_REQUIRED, 'Host name to listen to.', $defaultSocket->host())
-            ->addOption('port', null, InputOption::VALUE_REQUIRED, 'Range 0-65535. When 0 random available port is chosen.', $defaultSocket->port())
-            ->addOption('serve-static', 's', InputOption::VALUE_NONE, 'Enables serving static content from public directory.')
+        $sockets = $this->serverConfiguration->getSockets();
+        $serverSocket = $sockets->getServerSocket();
+        $this->addOption('host', null, InputOption::VALUE_REQUIRED, 'Host name to bind to. To bind to any host, use: 0.0.0.0', $serverSocket->host())
+            ->addOption('port', null, InputOption::VALUE_REQUIRED, 'Listen for Swoole HTTP Server on this port, when 0 random available port is chosen', $serverSocket->port())
+            ->addOption('serve-static', 's', InputOption::VALUE_NONE, 'Enables serving static content from public directory')
             ->addOption('public-dir', null, InputOption::VALUE_REQUIRED, 'Public directory', $this->getDefaultPublicDir())
             ->addOption('trusted-hosts', null, InputOption::VALUE_REQUIRED, 'Trusted hosts', $this->parameterBag->get('swoole.http_server.trusted_hosts'))
-            ->addOption('trusted-proxies', null, InputOption::VALUE_REQUIRED, 'Trusted proxies', $this->parameterBag->get('swoole.http_server.trusted_proxies'));
+            ->addOption('trusted-proxies', null, InputOption::VALUE_REQUIRED, 'Trusted proxies', $this->parameterBag->get('swoole.http_server.trusted_proxies'))
+            ->addOption('api', null, InputOption::VALUE_NONE, 'Enable API Server')
+            ->addOption('api-port', null, InputOption::VALUE_REQUIRED, 'Listen for API Server on this port', $this->parameterBag->get('swoole.http_server.api.port'));
     }
 
     private function ensureXdebugDisabled(SymfonyStyle $io): void
@@ -134,9 +138,12 @@ abstract class AbstractServerStartCommand extends Command
             exit(1);
         }
 
+        $sockets = $this->serverConfiguration->getSockets();
+        $serverSocket = $sockets->getServerSocket();
         $server = HttpServerFactory::make(
-            $this->serverConfiguration->getDefaultSocket(),
-            $this->serverConfiguration->getRunningMode()
+            $serverSocket,
+            $this->serverConfiguration->getRunningMode(),
+            ...($sockets->hasApiSocket() ? [$sockets->getApiSocket()] : [])
         );
         $this->serverConfigurator->configure($server);
         $this->server->attach($server);
@@ -147,7 +154,10 @@ abstract class AbstractServerStartCommand extends Command
         $runtimeConfiguration = ['symfonyStyle' => $io] + $this->prepareRuntimeConfiguration($this->serverConfiguration, $input);
         $this->bootManager->boot($runtimeConfiguration);
 
-        $io->success(\sprintf('Swoole HTTP Server started on http://%s', $this->serverConfiguration->getDefaultSocket()->addressPort()));
+        $io->success(\sprintf('Swoole HTTP Server started on http://%s', $serverSocket->addressPort()));
+        if ($sockets->hasApiSocket()) {
+            $io->success(\sprintf('API Server started on http://%s', $sockets->getApiSocket()->addressPort()));
+        }
         $io->table(['Configuration', 'Values'], $this->prepareConfigurationRowsToPrint($this->serverConfiguration, $runtimeConfiguration));
 
         $this->startServer($this->serverConfiguration, $this->server, $io);
@@ -163,16 +173,26 @@ abstract class AbstractServerStartCommand extends Command
      */
     protected function prepareServerConfiguration(HttpServerConfiguration $serverConfiguration, InputInterface $input): void
     {
+        $sockets = $serverConfiguration->getSockets();
+
         $port = $input->getOption('port');
         $host = $input->getOption('host');
-        Assertion::numeric($port, 'Port must be numeric');
-        Assertion::string($host, 'Host must be string');
 
-        $socket = $serverConfiguration->getDefaultSocket()
+        Assertion::numeric($port, 'Port must be a number.');
+        Assertion::string($host, 'Host must be a string.');
+
+        $newServerSocket = $sockets->getServerSocket()
             ->withPort((int) $port)
             ->withHost($host);
 
-        $serverConfiguration->changeDefaultSocket($socket);
+        $sockets->changeServerSocket($newServerSocket);
+
+        if ((bool) $input->getOption('api') || $sockets->hasApiSocket()) {
+            $apiPort = $input->getOption('api-port');
+            Assertion::numeric($apiPort, 'Port must be a number.');
+
+            $sockets->changeApiSocket(new Socket('0.0.0.0', (int) $apiPort));
+        }
 
         if (\filter_var($input->getOption('serve-static'), FILTER_VALIDATE_BOOLEAN)) {
             $publicDir = $input->getOption('public-dir');
