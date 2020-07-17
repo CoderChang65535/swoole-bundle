@@ -14,6 +14,20 @@ use K911\Swoole\Server\Config\Sockets;
  */
 class HttpServerConfiguration
 {
+    private const SWOOLE_HTTP_SERVER_CONFIG_DAEMONIZE = 'daemonize';
+    private const SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC = 'serve_static';
+    private const SWOOLE_HTTP_SERVER_CONFIG_REACTOR_COUNT = 'reactor_count';
+    private const SWOOLE_HTTP_SERVER_CONFIG_WORKER_COUNT = 'worker_count';
+    private const SWOOLE_HTTP_SERVER_CONFIG_TASK_WORKER_COUNT = 'task_worker_count';
+    private const SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR = 'public_dir';
+    private const SWOOLE_HTTP_SERVER_CONFIG_LOG_FILE = 'log_file';
+    private const SWOOLE_HTTP_SERVER_CONFIG_LOG_LEVEL = 'log_level';
+    private const SWOOLE_HTTP_SERVER_CONFIG_PID_FILE = 'pid_file';
+    private const SWOOLE_HTTP_SERVER_CONFIG_BUFFER_OUTPUT_SIZE = 'buffer_output_size';
+    private const SWOOLE_HTTP_SERVER_CONFIG_PACKAGE_MAX_LENGTH = 'package_max_length';
+    private const SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST = 'worker_max_request';
+    private const SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST_GRACE = 'worker_max_request_grace';
+
     /**
      * @todo add more
      *
@@ -21,15 +35,19 @@ class HttpServerConfiguration
      * @see https://github.com/swoole/swoole-docs/blob/master/modules/swoole-http-server/configuration.md
      */
     private const SWOOLE_HTTP_SERVER_CONFIGURATION = [
-        'reactor_count' => 'reactor_num',
-        'daemonize' => 'daemonize',
-        'worker_count' => 'worker_num',
-        'serve_static' => 'enable_static_handler',
-        'public_dir' => 'document_root',
-        'log_file' => 'log_file',
-        'log_level' => 'log_level',
-        'pid_file' => 'pid_file',
-        'buffer_output_size' => 'buffer_output_size',
+        self::SWOOLE_HTTP_SERVER_CONFIG_REACTOR_COUNT => 'reactor_num',
+        self::SWOOLE_HTTP_SERVER_CONFIG_DAEMONIZE => 'daemonize',
+        self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_COUNT => 'worker_num',
+        self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC => 'enable_static_handler',
+        self::SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR => 'document_root',
+        self::SWOOLE_HTTP_SERVER_CONFIG_LOG_FILE => 'log_file',
+        self::SWOOLE_HTTP_SERVER_CONFIG_LOG_LEVEL => 'log_level',
+        self::SWOOLE_HTTP_SERVER_CONFIG_PID_FILE => 'pid_file',
+        self::SWOOLE_HTTP_SERVER_CONFIG_BUFFER_OUTPUT_SIZE => 'buffer_output_size',
+        self::SWOOLE_HTTP_SERVER_CONFIG_PACKAGE_MAX_LENGTH => 'package_max_length',
+        self::SWOOLE_HTTP_SERVER_CONFIG_TASK_WORKER_COUNT => 'task_worker_num',
+        self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST => 'max_request',
+        self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST_GRACE => 'max_request_grace',
     ];
 
     private const SWOOLE_SERVE_STATIC = [
@@ -48,18 +66,28 @@ class HttpServerConfiguration
     ];
 
     private $sockets;
+
+    /**
+     * @var string
+     */
     private $runningMode;
+
+    /**
+     * @var array<string, mixed>
+     */
     private $settings;
 
     /**
-     * @param Sockets $sockets
-     * @param string  $runningMode
-     * @param array   $settings    settings available:
-     *                             - reactor_count (default: number of cpu cores)
-     *                             - worker_count (default: 2 * number of cpu cores)
-     *                             - serve_static_files (default: false)
-     *                             - public_dir (default: '%kernel.root_dir%/public')
-     *                             - buffer_output_size (default: '2097152' unit in byte (2MB))
+     * @param array $settings settings available:
+     *                        - reactor_count (default: number of cpu cores)
+     *                        - worker_count (default: 2 * number of cpu cores)
+     *                        - task_worker_count (default: unset; "auto" => number of cpu cores; number of task workers)
+     *                        - serve_static_files (default: false)
+     *                        - public_dir (default: '%kernel.root_dir%/public')
+     *                        - buffer_output_size (default: '2097152' unit in byte (2MB))
+     *                        - package_max_length (default: '8388608b' unit in byte (8MB))
+     *                        - worker_max_requests: Number of requests after which the worker reloads
+     *                        - worker_max_requests_grace: Max random number of requests for worker reloading
      *
      * @throws \Assert\AssertionFailedException
      */
@@ -78,105 +106,26 @@ class HttpServerConfiguration
         $this->runningMode = $runningMode;
     }
 
-    /**
-     * @param array $init
-     *
-     * @throws \Assert\AssertionFailedException
-     */
-    private function initializeSettings(array $init): void
-    {
-        $this->settings = [];
-        $cpuCores = \swoole_cpu_num();
-
-        if (!isset($init['reactor_count'])) {
-            $init['reactor_count'] = $cpuCores;
-        }
-
-        if (!isset($init['worker_count'])) {
-            $init['worker_count'] = 2 * $cpuCores;
-        }
-
-        $this->setSettings($init);
-    }
-
-    /**
-     * @param array $settings
-     *
-     * @throws \Assert\AssertionFailedException
-     */
-    private function setSettings(array $settings): void
-    {
-        foreach ($settings as $name => $value) {
-            if (null !== $value) {
-                $this->validateSetting($name, $value);
-                $this->settings[$name] = $value;
-            }
-        }
-
-        Assertion::false($this->isDaemon() && !$this->hasPidFile(), 'Pid file is required when using daemon mode');
-        Assertion::false($this->servingStaticContent() && !$this->hasPublicDir(), 'Enabling static files serving requires providing "public_dir" setting.');
-    }
-
-    /**
-     * @param string $key
-     * @param mixed  $value
-     *
-     * @throws \Assert\AssertionFailedException
-     */
-    private function validateSetting(string $key, $value): void
-    {
-        Assertion::keyExists(self::SWOOLE_HTTP_SERVER_CONFIGURATION, $key, 'There is no configuration mapping for setting "%s".');
-
-        switch ($key) {
-            case 'serve_static':
-                Assertion::inArray($value, \array_keys(self::SWOOLE_SERVE_STATIC));
-                break;
-            case 'daemonize':
-                Assertion::boolean($value);
-                break;
-            case 'public_dir':
-                Assertion::directory($value, 'Public directory does not exists. Tried "%s".');
-                break;
-            case 'log_level':
-                Assertion::inArray($value, \array_keys(self::SWOOLE_LOG_LEVELS));
-                break;
-            case 'buffer_output_size':
-                Assertion::integer($value, \sprintf('Setting "%s" must be an integer.', $key));
-                Assertion::greaterThan($value, 0, 'Buffer output size value cannot be negative or zero, "%s" provided.');
-                break;
-            case 'reactor_count':
-            case 'worker_count':
-                Assertion::integer($value, \sprintf('Setting "%s" must be an integer.', $key));
-                Assertion::greaterThan($value, 0, 'Count value cannot be negative, "%s" provided.');
-                break;
-            default:
-                return;
-        }
-    }
-
     public function isDaemon(): bool
     {
-        return isset($this->settings['daemonize']);
+        return isset($this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_DAEMONIZE]);
     }
 
     public function hasPidFile(): bool
     {
-        return isset($this->settings['pid_file']);
+        return isset($this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_PID_FILE]);
     }
 
     public function servingStaticContent(): bool
     {
-        return isset($this->settings['serve_static']) && 'off' !== $this->settings['serve_static'];
+        return isset($this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC]) && 'off' !== $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC];
     }
 
     public function hasPublicDir(): bool
     {
-        return isset($this->settings['public_dir']);
+        return !empty($this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR]);
     }
 
-    /**
-     * @param Socket $socket
-     */
     public function changeServerSocket(Socket $socket): void
     {
         $this->sockets->changeServerSocket($socket);
@@ -188,18 +137,16 @@ class HttpServerConfiguration
     }
 
     /**
-     * @param string $publicDir
-     *
      * @throws \Assert\AssertionFailedException
      */
     public function enableServingStaticFiles(string $publicDir): void
     {
         $settings = [
-            'public_dir' => $publicDir,
+            self::SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR => $publicDir,
         ];
 
-        if ('off' === $this->settings['serve_static']) {
-            $settings['serve_static'] = 'default';
+        if ('off' === $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC]) {
+            $settings[self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC] = 'default';
         }
 
         $this->setSettings($settings);
@@ -217,8 +164,6 @@ class HttpServerConfiguration
 
     /**
      * @throws \Assert\AssertionFailedException
-     *
-     * @return int
      */
     public function getPid(): int
     {
@@ -238,24 +183,22 @@ class HttpServerConfiguration
 
     /**
      * @throws \Assert\AssertionFailedException
-     *
-     * @return string
      */
     public function getPidFile(): string
     {
-        Assertion::keyIsset($this->settings, 'pid_file', 'Setting "%s" is not set.');
+        Assertion::keyIsset($this->settings, self::SWOOLE_HTTP_SERVER_CONFIG_PID_FILE, 'Setting "%s" is not set.');
 
-        return $this->settings['pid_file'];
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_PID_FILE];
     }
 
     public function getWorkerCount(): int
     {
-        return $this->settings['worker_count'];
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_COUNT];
     }
 
     public function getReactorCount(): int
     {
-        return $this->settings['reactor_count'];
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_REACTOR_COUNT];
     }
 
     public function getServerSocket(): Socket
@@ -263,16 +206,24 @@ class HttpServerConfiguration
         return $this->sockets->getServerSocket();
     }
 
+    public function getMaxRequest(): int
+    {
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST];
+    }
+
+    public function getMaxRequestGrace(): ?int
+    {
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST_GRACE] ?? null;
+    }
+
     /**
      * @throws \Assert\AssertionFailedException
-     *
-     * @return string|null
      */
-    public function getPublicDir(): ?string
+    public function getPublicDir(): string
     {
-        Assertion::keyIsset($this->settings, 'public_dir', 'Setting "%s" is not set.');
+        Assertion::true($this->hasPublicDir(), \sprintf('Setting "%s" is not set or empty.', self::SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR));
 
-        return $this->settings['public_dir'];
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR];
     }
 
     public function getSettings(): array
@@ -282,8 +233,6 @@ class HttpServerConfiguration
 
     /**
      * Get settings formatted for swoole http server.
-     *
-     * @return array
      *
      * @see \Swoole\Http\Server::set()
      *
@@ -308,43 +257,160 @@ class HttpServerConfiguration
     }
 
     /**
-     * @return int
-     *
      * @see getSwooleSettings()
      */
     public function getSwooleLogLevel(): int
     {
-        return self::SWOOLE_LOG_LEVELS[$this->settings['log_level']];
+        return self::SWOOLE_LOG_LEVELS[$this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_LOG_LEVEL]];
     }
 
     /**
-     * @return bool
-     *
      * @see getSwooleSettings()
      */
     public function getSwooleEnableStaticHandler(): bool
     {
-        return self::SWOOLE_SERVE_STATIC[$this->settings['serve_static']];
-    }
-
-    public function getSwooleDocumentRoot(): ?string
-    {
-        return 'default' === $this->settings['serve_static'] ? $this->settings['public_dir'] : null;
+        return self::SWOOLE_SERVE_STATIC[$this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC]];
     }
 
     /**
-     * @param string|null $pidFile
-     *
+     * @see getSwooleSettings()
+     */
+    public function getSwooleDocumentRoot(): ?string
+    {
+        return 'default' === $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC] ? $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR] : null;
+    }
+
+    /**
+     * @see getSwooleSettings()
+     */
+    public function getSwooleMaxRequest(): int
+    {
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST] ?? 0;
+    }
+
+    /**
+     * @see getSwooleSettings()
+     */
+    public function getSwooleMaxRequestGrace(): ?int
+    {
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST_GRACE] ?? null;
+    }
+
+    /**
      * @throws \Assert\AssertionFailedException
      */
     public function daemonize(?string $pidFile = null): void
     {
-        $settings = ['daemonize' => true];
+        $settings = [self::SWOOLE_HTTP_SERVER_CONFIG_DAEMONIZE => true];
 
         if (null !== $pidFile) {
-            $settings['pid_file'] = $pidFile;
+            $settings[self::SWOOLE_HTTP_SERVER_CONFIG_PID_FILE] = $pidFile;
         }
 
         $this->setSettings($settings);
+    }
+
+    public function getTaskWorkerCount(): int
+    {
+        return $this->settings[self::SWOOLE_HTTP_SERVER_CONFIG_TASK_WORKER_COUNT] ?? 0;
+    }
+
+    /**
+     * @throws \Assert\AssertionFailedException
+     */
+    private function initializeSettings(array $init): void
+    {
+        $this->settings = [];
+        $cpuCores = \swoole_cpu_num();
+
+        if (!isset($init[self::SWOOLE_HTTP_SERVER_CONFIG_REACTOR_COUNT])) {
+            $init[self::SWOOLE_HTTP_SERVER_CONFIG_REACTOR_COUNT] = $cpuCores;
+        }
+
+        if (!isset($init[self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_COUNT])) {
+            $init[self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_COUNT] = 2 * $cpuCores;
+        }
+
+        if (\array_key_exists(self::SWOOLE_HTTP_SERVER_CONFIG_TASK_WORKER_COUNT, $init) && 'auto' === $init[self::SWOOLE_HTTP_SERVER_CONFIG_TASK_WORKER_COUNT]) {
+            $init[self::SWOOLE_HTTP_SERVER_CONFIG_TASK_WORKER_COUNT] = $cpuCores;
+        }
+
+        $this->setSettings($init);
+    }
+
+    /**
+     * @param array<string, mixed> $settings
+     *
+     * @throws \Assert\AssertionFailedException
+     */
+    private function setSettings(array $settings): void
+    {
+        foreach ($settings as $name => $value) {
+            if (null !== $value) {
+                $this->validateSetting($name, $value);
+                $this->settings[$name] = $value;
+            }
+        }
+
+        Assertion::false($this->isDaemon() && !$this->hasPidFile(), 'Pid file is required when using daemon mode');
+        Assertion::false($this->servingStaticContent() && !$this->hasPublicDir(), 'Enabling static files serving requires providing "public_dir" setting.');
+    }
+
+    /**
+     * @param mixed $value
+     *
+     * @throws \Assert\AssertionFailedException
+     */
+    private function validateSetting(string $key, $value): void
+    {
+        Assertion::keyExists(self::SWOOLE_HTTP_SERVER_CONFIGURATION, $key, 'There is no configuration mapping for setting "%s".');
+
+        switch ($key) {
+            case self::SWOOLE_HTTP_SERVER_CONFIG_SERVE_STATIC:
+                Assertion::inArray($value, \array_keys(self::SWOOLE_SERVE_STATIC));
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_DAEMONIZE:
+                Assertion::boolean($value);
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_PUBLIC_DIR:
+                Assertion::directory($value, 'Public directory does not exists. Tried "%s".');
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_LOG_LEVEL:
+                Assertion::inArray($value, \array_keys(self::SWOOLE_LOG_LEVELS));
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_PACKAGE_MAX_LENGTH:
+                Assertion::integer($value, \sprintf('Setting "%s" must be an integer.', $key));
+                Assertion::greaterThan($value, 0, 'Package max length value cannot be negative or zero, "%s" provided.');
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_BUFFER_OUTPUT_SIZE:
+                Assertion::integer($value, \sprintf('Setting "%s" must be an integer.', $key));
+                Assertion::greaterThan($value, 0, 'Buffer output size value cannot be negative or zero, "%s" provided.');
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_TASK_WORKER_COUNT:
+            case self::SWOOLE_HTTP_SERVER_CONFIG_REACTOR_COUNT:
+            case self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_COUNT:
+                Assertion::integer($value, \sprintf('Setting "%s" must be an integer.', $key));
+                Assertion::greaterThan($value, 0, 'Count value cannot be negative, "%s" provided.');
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST:
+                Assertion::integer($value, \sprintf('Setting "%s" must be an integer.', $key));
+                Assertion::greaterOrEqualThan($value, 0, 'Value cannot be negative, "%s" provided.');
+
+                break;
+            case self::SWOOLE_HTTP_SERVER_CONFIG_WORKER_MAX_REQUEST_GRACE:
+                Assertion::nullOrInteger($value, \sprintf('Setting "%s" must be an integer or null.', $key));
+                Assertion::nullOrGreaterOrEqualThan($value, 0, 'Value cannot be negative, "%s" provided.');
+
+                break;
+            default:
+                return;
+        }
     }
 }

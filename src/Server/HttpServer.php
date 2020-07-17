@@ -16,10 +16,12 @@ use Throwable;
 
 final class HttpServer
 {
+    public const GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 10;
+
     private $running;
     private $configuration;
     /**
-     * @var Server|null
+     * @var null|Server
      */
     private $server;
 
@@ -29,11 +31,13 @@ final class HttpServer
     private $listeners = [];
     private $signalTerminate;
     private $signalReload;
+    private $signalKill;
 
     public function __construct(HttpServerConfiguration $configuration, bool $running = false)
     {
         $this->signalTerminate = \defined('SIGTERM') ? (int) \constant('SIGTERM') : 15;
         $this->signalReload = \defined('SIGUSR1') ? (int) \constant('SIGUSR1') : 10;
+        $this->signalKill = \defined('SIGKILL') ? (int) \constant('SIGKILL') : 9;
 
         $this->running = $running;
         $this->configuration = $configuration;
@@ -41,8 +45,6 @@ final class HttpServer
 
     /**
      * Attach already configured Swoole HTTP Server instance.
-     *
-     * @param Server $server
      */
     public function attach(Server $server): void
     {
@@ -51,7 +53,8 @@ final class HttpServer
 
         $this->server = $server;
         $defaultSocketPort = $this->configuration->getServerSocket()
-            ->port();
+            ->port()
+        ;
 
         foreach ($server->ports as $listener) {
             if ($listener->port === $defaultSocketPort) {
@@ -63,9 +66,6 @@ final class HttpServer
         }
     }
 
-    /**
-     * @return bool
-     */
     public function start(): bool
     {
         return $this->running = $this->getServer()->start();
@@ -80,7 +80,7 @@ final class HttpServer
         if ($this->server instanceof Server) {
             $this->server->shutdown();
         } elseif ($this->isRunningInBackground()) {
-            Process::kill($this->configuration->getPid(), $this->signalTerminate);
+            $this->gracefulSignalShutdown($this->configuration->getPid(), self::GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS);
         } else {
             throw NotRunningException::make();
         }
@@ -106,24 +106,9 @@ final class HttpServer
         return $this->getServer()->stats();
     }
 
-    /**
-     * @return bool
-     */
     public function isRunning(): bool
     {
         return $this->running || $this->isRunningInBackground();
-    }
-
-    /**
-     * @return bool
-     */
-    private function isRunningInBackground(): bool
-    {
-        try {
-            return Process::kill($this->configuration->getPid(), 0);
-        } catch (Throwable $ex) {
-            return false;
-        }
     }
 
     public function getServer(): Server
@@ -136,11 +121,28 @@ final class HttpServer
     }
 
     /**
+     * @param mixed $data
+     */
+    public function dispatchTask($data): void
+    {
+        $this->getServer()->task($data);
+    }
+
+    /**
      * @return Listener[]
      */
     public function getListeners(): array
     {
         return $this->listeners;
+    }
+
+    private function isRunningInBackground(): bool
+    {
+        try {
+            return Process::kill($this->configuration->getPid(), 0);
+        } catch (Throwable $ex) {
+            return false;
+        }
     }
 
     private function assertNotInitialized(): void
@@ -168,5 +170,21 @@ final class HttpServer
         }
 
         throw PortUnavailableException::fortPort($port);
+    }
+
+    private function gracefulSignalShutdown(int $masterPid, float $timeoutSeconds): void
+    {
+        Process::kill($masterPid, $this->signalTerminate);
+
+        $start = $now = \microtime(true);
+        $max = $start + $timeoutSeconds;
+        while ($this->isRunningInBackground() && $now < $max) {
+            $now = \microtime(true);
+            \usleep(1000);
+        }
+
+        if ($this->isRunningInBackground()) {
+            Process::kill($masterPid, $this->signalKill);
+        }
     }
 }

@@ -15,13 +15,14 @@ use Swoole\Http\Response;
 
 class EntityManagerHandlerTest extends TestCase
 {
+    use \Prophecy\PhpUnit\ProphecyTrait;
     /**
      * @var EntityManagerHandler
      */
     private $httpDriver;
 
     /**
-     * @var RequestHandlerInterface|ObjectProphecy
+     * @var ObjectProphecy|RequestHandlerInterface
      */
     private $decoratedProphecy;
 

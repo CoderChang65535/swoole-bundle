@@ -40,11 +40,6 @@ final class Socket
     private $ssl;
 
     /**
-     * @param string $host
-     * @param int    $port
-     * @param string $type
-     * @param bool   $ssl
-     *
      * @throws \Assert\AssertionFailedException
      */
     public function __construct(string $host = '0.0.0.0', int $port = 9501, string $type = 'tcp', bool $ssl = false)
@@ -61,38 +56,6 @@ final class Socket
     }
 
     /**
-     * @param string $addressPort
-     *
-     * @return array values:
-     *               - string host
-     *               - int port
-     */
-    private static function splitAddressPort(string $addressPort): array
-    {
-        $pos = \mb_strrpos($addressPort, ':');
-
-        if (false !== $pos) {
-            $host = \mb_substr($addressPort, 0, $pos);
-            if ('*' === $host) {
-                $host = '0.0.0.0';
-            }
-            $port = \mb_substr($addressPort, $pos + 1);
-        } elseif (\ctype_digit($addressPort)) {
-            $host = '127.0.0.1';
-            $port = $addressPort;
-        } else {
-            $host = $addressPort;
-            $port = 9501;
-        }
-
-        return [$host, (int) $port];
-    }
-
-    /**
-     * @param string $addressPort
-     * @param string $socketType
-     * @param bool   $enableSsl
-     *
      * @throws \Assert\AssertionFailedException
      *
      * @return Socket
@@ -138,12 +101,6 @@ final class Socket
         return $this->ssl;
     }
 
-    private function setPort(int $port): void
-    {
-        Assertion::between($port, 0, 65535, 'Port must be an integer between 0 and 65535');
-        $this->port = $port;
-    }
-
     public function withPort(int $port): self
     {
         $self = clone $this;
@@ -159,6 +116,38 @@ final class Socket
         $self->setHost($host);
 
         return $self;
+    }
+
+    /**
+     * @return array values:
+     *               - string host
+     *               - int port
+     */
+    private static function splitAddressPort(string $addressPort): array
+    {
+        $pos = \mb_strrpos($addressPort, ':');
+
+        if (false !== $pos) {
+            $host = \mb_substr($addressPort, 0, $pos);
+            if ('*' === $host) {
+                $host = '0.0.0.0';
+            }
+            $port = \mb_substr($addressPort, $pos + 1);
+        } elseif (\ctype_digit($addressPort)) {
+            $host = '127.0.0.1';
+            $port = $addressPort;
+        } else {
+            $host = $addressPort;
+            $port = 9501;
+        }
+
+        return [$host, (int) $port];
+    }
+
+    private function setPort(int $port): void
+    {
+        Assertion::between($port, 0, 65535, 'Port must be an integer between 0 and 65535');
+        $this->port = $port;
     }
 
     private function setHost(string $host): void

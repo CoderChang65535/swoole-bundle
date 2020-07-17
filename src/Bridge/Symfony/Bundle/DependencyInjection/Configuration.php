@@ -7,6 +7,7 @@ namespace K911\Swoole\Bridge\Symfony\Bundle\DependencyInjection;
 use function K911\Swoole\decode_string_as_set;
 use Symfony\Component\Config\Definition\Builder\TreeBuilder;
 use Symfony\Component\Config\Definition\ConfigurationInterface;
+use Symfony\Component\Config\Definition\Exception\InvalidTypeException;
 
 final class Configuration implements ConfigurationInterface
 {
@@ -29,11 +30,7 @@ final class Configuration implements ConfigurationInterface
      */
     public function getConfigTreeBuilder(): TreeBuilder
     {
-        $rootNode = \method_exists($this->builder, 'getRootNode') ?
-            $this->builder->getRootNode() :
-            $this->builder->root(self::CONFIG_NAME);
-
-        $rootNode
+        $this->builder->getRootNode()
             ->children()
                 ->arrayNode('http_server')
                     ->addDefaultsIfNotSet()
@@ -116,9 +113,10 @@ final class Configuration implements ConfigurationInterface
                                 ->ifString()
                                 ->then(function ($v): array {
                                     return [
-                                       'strategy' => $v,
-                                       'public_dir' => 'off' === $v ? null : self::DEFAULT_PUBLIC_DIR,
-                                   ];
+                                        'strategy' => $v,
+                                        'public_dir' => 'off' === $v ? null : self::DEFAULT_PUBLIC_DIR,
+                                        'mime_types' => [],
+                                    ];
                                 })
                             ->end()
                             ->children()
@@ -130,8 +128,60 @@ final class Configuration implements ConfigurationInterface
                                 ->scalarNode('public_dir')
                                     ->defaultValue(self::DEFAULT_PUBLIC_DIR)
                                 ->end()
+                                ->variableNode('mime_types')
+                                    ->info('File extensions to mime types map.')
+                                    ->defaultValue([])
+                                    ->validate()
+                                        ->always(function ($mimeTypes) {
+                                            $validValues = [];
+
+                                            foreach ((array) $mimeTypes as $extension => $mimeType) {
+                                                $extension = \trim((string) $extension);
+                                                $mimeType = \trim((string) $mimeType);
+
+                                                if ('' === $extension || '' === $mimeType) {
+                                                    throw new InvalidTypeException(\sprintf('Invalid mime type %s for file extension %s.', $mimeType, $extension));
+                                                }
+
+                                                $validValues[$extension] = $mimeType;
+                                            }
+
+                                            return $validValues;
+                                        })
+                                    ->end()
+                                ->end() // end mime types
                             ->end()
                         ->end() // end static
+                        ->arrayNode('exception_handler')
+                            ->addDefaultsIfNotSet()
+                            ->beforeNormalization()
+                                ->ifString()
+                                ->then(function ($v): array {
+                                    return [
+                                        'type' => $v,
+                                        'verbosity' => 'auto',
+                                        'handler_id' => null,
+                                    ];
+                                })
+                            ->end()
+                            ->children()
+                                ->enumNode('type')
+                                    ->cannotBeEmpty()
+                                    ->defaultValue('auto')
+                                    ->treatFalseLike('auto')
+                                    ->values(['json', 'production', 'symfony', 'custom', 'auto'])
+                                ->end()
+                                ->enumNode('verbosity')
+                                    ->cannotBeEmpty()
+                                    ->defaultValue('auto')
+                                    ->treatFalseLike('auto')
+                                    ->values(['trace', 'verbose', 'default', 'auto'])
+                                ->end()
+                                ->scalarNode('handler_id')
+                                    ->defaultNull()
+                                ->end()
+                            ->end()
+                        ->end() // end exception_handler
                         ->arrayNode('services')
                             ->addDefaultsIfNotSet()
                             ->children()
@@ -148,6 +198,13 @@ final class Configuration implements ConfigurationInterface
                                 ->end()
                                 ->booleanNode('entity_manager_handler')
                                     ->defaultNull()
+                                ->end()
+                                ->booleanNode('blackfire_profiler')
+                                    ->defaultNull()
+                                ->end()
+                                ->booleanNode('session_cookie_event_listener')
+                                    ->defaultFalse()
+                                    ->treatNullLike(false)
                                 ->end()
                             ->end()
                         ->end() // drivers
@@ -169,11 +226,24 @@ final class Configuration implements ConfigurationInterface
                                 ->scalarNode('buffer_output_size')
                                     ->defaultValue(2097152)
                                 ->end()
-                                ->integerNode('worker_count')
-                                    ->min(1)
+                                ->scalarNode('package_max_length')
+                                    ->defaultValue(8388608)
                                 ->end()
-                                ->integerNode('reactor_count')
-                                    ->min(1)
+                                ->scalarNode('worker_count')
+                                    ->defaultValue(1)
+                                ->end()
+                                ->scalarNode('reactor_count')
+                                    ->defaultValue(1)
+                                ->end()
+                                ->scalarNode('task_worker_count')
+                                    ->defaultNull()
+                                ->end()
+                                ->integerNode('worker_max_request')
+                                    ->min(0)
+                                    ->defaultValue(0)
+                                ->end()
+                                ->scalarNode('worker_max_request_grace')
+                                    ->defaultNull()
                                 ->end()
                             ->end()
                         ->end() // settings

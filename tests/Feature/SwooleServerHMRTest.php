@@ -15,23 +15,26 @@ final class SwooleServerHMRTest extends ServerTestCase
     private const CONTROLLER_TEMPLATE_SRC = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php.tmpl';
     private const CONTROLLER_TEMPLATE_DEST = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php';
 
+    protected function setUp(): void
+    {
+        $this->markTestSkippedIfXdebugEnabled();
+        $this->markTestSkippedIfInotifyDisabled();
+    }
+
     public function testStartCallHMRCallStopWithAutoRegistration(): void
     {
-        $this->markTestSkippedIfInotifyDisabled();
-
         $serverStart = $this->createConsoleProcess([
             'swoole:server:start',
             '--host=localhost',
             '--port=9999',
         ], ['APP_ENV' => 'auto']);
 
-        $serverStart->disableOutput();
         $serverStart->setTimeout(3);
         $serverStart->run();
 
         $this->assertProcessSucceeded($serverStart);
 
-        $this->goAndWait(function (): void {
+        $this->runAsCoroutineAndWait(function (): void {
             $this->deferServerStop();
             $this->deferRestoreOriginalTemplateControllerResponse();
 
@@ -60,21 +63,18 @@ final class SwooleServerHMRTest extends ServerTestCase
 
     public function testHMRDisabledByDefaultOnProduction(): void
     {
-        $this->markTestSkippedIfInotifyDisabled();
-
         $serverStart = $this->createConsoleProcess([
             'swoole:server:start',
             '--host=localhost',
             '--port=9999',
         ], ['APP_ENV' => 'prod']);
 
-        $serverStart->disableOutput();
         $serverStart->setTimeout(3);
         $serverStart->run();
 
         $this->assertProcessSucceeded($serverStart);
 
-        $this->goAndWait(function (): void {
+        $this->runAsCoroutineAndWait(function (): void {
             $this->deferServerStop();
             $this->deferRestoreOriginalTemplateControllerResponse();
 

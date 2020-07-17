@@ -16,6 +16,11 @@ final class SwooleServerReloadViaHttpApiTest extends ServerTestCase
     private const CONTROLLER_TEMPLATE_SRC = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php.tmpl';
     private const CONTROLLER_TEMPLATE_DEST = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php';
 
+    protected function setUp(): void
+    {
+        $this->markTestSkippedIfXdebugEnabled();
+    }
+
     public function testStartRequestApiToReloadCallStop(): void
     {
         $serverStart = $this->createConsoleProcess([
@@ -26,15 +31,12 @@ final class SwooleServerReloadViaHttpApiTest extends ServerTestCase
             '--api-port=9998',
         ]);
 
-        if (self::coverageEnabled()) {
-            $serverStart->disableOutput();
-        }
         $serverStart->setTimeout(3);
         $serverStart->run();
 
         $this->assertProcessSucceeded($serverStart);
 
-        $this->goAndWait(function (): void {
+        $this->runAsCoroutineAndWait(function (): void {
             $this->deferServerStop();
             $this->deferRestoreOriginalTemplateControllerResponse();
 

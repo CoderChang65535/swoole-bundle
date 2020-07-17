@@ -9,27 +9,35 @@ cache:
 env:
   global:
     - COMPOSER_ARGS=install
-    - SWOOLE_VERSION=4.3.1
+    - SWOOLE_VERSION=4.5.2
 
 matrix:
   include:
-    - php: "7.2"
-    - php: "7.2"
+    - php: "7.3"
       env:
         - "COMPOSER_ARGS='update --prefer-lowest'"
     - php: "7.3"
-      env:
-        - DEPLOY=1
     - php: "7.3"
       env:
         - SWOOLE_LATEST=1
-        - COMPOSER_ARGS=update
+        - COMPOSER_ARGS='install --ignore-platform-reqs'
     - php: "7.3"
+      env:
+        - COMPOSER_ARGS=update
+    - php: "7.4"
+    - php: "7.4"
       env:
         - SWOOLE_LATEST=1
-    - php: "7.3"
+    - php: "7.4"
       env:
-        - COMPOSER_ARGS=update
+        - SWOOLE_LATEST=1
+        - COMPOSER_ARGS='update --ignore-platform-reqs'
+  fast_finish: true
+  allow_failures:
+    - php: "7.4"
+      env:
+        - SWOOLE_LATEST=1
+        - COMPOSER_ARGS='update --ignore-platform-reqs'
 
 before_script:
   - phpenv config-rm xdebug.ini
@@ -48,7 +56,7 @@ before_install:
   - php -r "echo swoole_version().PHP_EOL;"
 
 install:
-  - export COMPOSER_ARGS="$COMPOSER_ARGS --prefer-dist --no-progress --no-suggest --no-scripts --ansi"
+  - export COMPOSER_ARGS="$COMPOSER_ARGS --prefer-dist --no-progress --no-suggest --ansi"
   - echo "composer $COMPOSER_ARGS"
   - composer $COMPOSER_ARGS
 
@@ -56,17 +64,3 @@ script:
   - composer analyse
   - composer unit-tests
   - composer feature-tests
-
-before_deploy:
-  - >-
-      export VERSION=$(git tag -l | sort -V -r | head -1 | sed -E 's/v(.*)/\1/')
-      && echo "VERSION=${VERSION}"
-  - yarn global add conventional-changelog-cli conventional-recommended-bump conventional-github-releaser
-
-deploy:
-  - provider: script
-    skip_cleanup: true
-    script: bash ./deploy/releaser.sh
-    on:
-      branch: master
-      condition: $DEPLOY = 1

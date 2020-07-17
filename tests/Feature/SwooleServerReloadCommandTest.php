@@ -15,6 +15,11 @@ final class SwooleServerReloadCommandTest extends ServerTestCase
     private const CONTROLLER_TEMPLATE_SRC = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php.tmpl';
     private const CONTROLLER_TEMPLATE_DEST = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php';
 
+    protected function setUp(): void
+    {
+        $this->markTestSkippedIfXdebugEnabled();
+    }
+
     public function testStartCallReloadCallStop(): void
     {
         $serverStart = $this->createConsoleProcess([
@@ -23,15 +28,12 @@ final class SwooleServerReloadCommandTest extends ServerTestCase
             '--port=9999',
         ]);
 
-        if (self::coverageEnabled()) {
-            $serverStart->disableOutput();
-        }
         $serverStart->setTimeout(3);
         $serverStart->run();
 
         $this->assertProcessSucceeded($serverStart);
 
-        $this->goAndWait(function (): void {
+        $this->runAsCoroutineAndWait(function (): void {
             $this->deferServerStop();
             $this->deferRestoreOriginalTemplateControllerResponse();
 
@@ -66,9 +68,6 @@ final class SwooleServerReloadCommandTest extends ServerTestCase
     {
         $serverReload = $this->createConsoleProcess(['swoole:server:reload']);
 
-        if (self::coverageEnabled()) {
-            $serverReload->disableOutput();
-        }
         $serverReload->setTimeout(3);
         $serverReload->run();
 

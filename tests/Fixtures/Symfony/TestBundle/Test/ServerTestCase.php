@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace K911\Swoole\Tests\Fixtures\Symfony\TestBundle\Test;
 
 use K911\Swoole\Client\HttpClient;
+use K911\Swoole\Coroutine\CoroutinePool;
 use K911\Swoole\Tests\Fixtures\Symfony\TestAppKernel;
-use PHPUnit\Framework\Exception;
-use Swoole\Event;
+use Swoole\Coroutine\Scheduler;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\HttpKernel\Kernel;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
@@ -21,11 +22,11 @@ class ServerTestCase extends KernelTestCase
     private const COMMAND = './console';
     private const WORKING_DIRECTORY = __DIR__.'/../../app';
 
-    protected static function createKernel(array $options = []): KernelInterface
+    protected function tearDown(): void
     {
-        $options['environment'] = self::resolveEnvironment($options['environment'] ?? null);
-
-        return parent::createKernel($options);
+        // Make sure everything is stopped
+//        $this->killAllProcessesListeningOnPort(9999);
+        \sleep(self::coverageEnabled() ? 3 : 1);
     }
 
     public static function resolveEnvironment(?string $env = null): string
@@ -46,48 +47,27 @@ class ServerTestCase extends KernelTestCase
         return false !== \getenv('COVERAGE');
     }
 
-    protected static function getKernelClass(): string
+    public function runAsCoroutineAndWait(callable $callable): void
     {
-        return TestAppKernel::class;
-    }
+        $coroutinePool = CoroutinePool::fromCoroutines($callable);
 
-    public function goAndWait(callable $callable): void
-    {
         try {
-            \go($this->wrapAndTrap($callable));
+            $coroutinePool->run();
         } catch (\RuntimeException $runtimeException) {
             if (self::SWOOLE_XDEBUG_CORO_WARNING_MESSAGE !== $runtimeException->getMessage()) {
                 throw $runtimeException;
             }
         }
-        Event::wait();
     }
 
-    private function wrapAndTrap(callable $callable): callable
+    public function killAllProcessesListeningOnPort(int $port, int $timeout = 3): void
     {
-        return function () use ($callable): void {
-            try {
-                $callable();
-            } catch (Exception $failedException) {
-                throw $failedException;
-            } catch (\Throwable $exception) {
-                throw $exception;
-            }
-        };
-    }
-
-    /**
-     * @param Process $process
-     * @param int     $timeout seconds
-     * @param int     $signal  [default=SIGKILL]
-     */
-    public function deferProcessStop(Process $process, int $timeout = 3, ?int $signal = null): void
-    {
-        \defer(function () use ($process, $timeout, $signal): void {
-            $process->stop($timeout, $signal);
-
-            $this->assertProcessSucceeded($process);
-        });
+        $killProcessesListeningOnPort = Process::fromShellCommandline('kill -9 $(lsof -i ":$PORT" | grep php | awk \'{print $2}\') &> /dev/null || true');
+        $killProcessesListeningOnPort->setTimeout($timeout);
+        $killProcessesListeningOnPort->run(null, [
+            'PORT' => $port,
+        ]);
+        $this->assertProcessSucceeded($killProcessesListeningOnPort);
     }
 
     public function assertProcessSucceeded(Process $process): void
@@ -120,7 +100,7 @@ class ServerTestCase extends KernelTestCase
         $processArgs = \array_merge(['swoole:server:stop'], $args);
         $serverStop = $this->createConsoleProcess($processArgs);
 
-        $serverStop->setTimeout(3);
+        $serverStop->setTimeout(10);
         $serverStop->run();
 
         $this->assertProcessSucceeded($serverStop);
@@ -159,6 +139,23 @@ class ServerTestCase extends KernelTestCase
         ], $response['body']);
     }
 
+    public function assertProcessFailed(Process $process): void
+    {
+        $this->assertFalse($process->isSuccessful());
+    }
+
+    protected static function createKernel(array $options = []): KernelInterface
+    {
+        $options['environment'] = self::resolveEnvironment($options['environment'] ?? null);
+
+        return parent::createKernel($options);
+    }
+
+    protected static function getKernelClass(): string
+    {
+        return TestAppKernel::class;
+    }
+
     protected function markTestSkippedIfXdebugEnabled(): void
     {
         if (\extension_loaded('xdebug')) {
@@ -173,14 +170,27 @@ class ServerTestCase extends KernelTestCase
         }
     }
 
-    public function assertProcessFailed(Process $process): void
+    protected function markTestSkippedIfSymfonyVersionIsLoverThan(string $version): void
     {
-        $this->assertFalse($process->isSuccessful());
+        if (\version_compare(Kernel::VERSION, $version, 'lt')) {
+            $this->markTestSkipped(\sprintf('This test needs Symfony in version : %s.', $version));
+        }
     }
 
-    protected function tearDown(): void
+    protected function generateUniqueHash(int $factor = 8): string
     {
-        // Make sure everything is stopped
-        \sleep(1);
+        try {
+            return \bin2hex(\random_bytes($factor));
+        } catch (\Exception $e) {
+            $array = \range(1, $factor * 2);
+            \shuffle($array);
+
+            return \implode('', $array);
+        }
+    }
+
+    protected function currentUnixTimestamp(): int
+    {
+        return (new \DateTimeImmutable())->getTimestamp();
     }
 }

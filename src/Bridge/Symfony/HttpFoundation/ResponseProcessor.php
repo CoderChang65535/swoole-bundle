@@ -22,10 +22,7 @@ final class ResponseProcessor implements ResponseProcessorInterface
         }
 
         foreach ($httpFoundationResponse->headers->allPreserveCaseWithoutCookies() as $name => $values) {
-            /** @var array $values */
-            foreach ($values as $value) {
-                $swooleResponse->header($name, (string) $value);
-            }
+            $swooleResponse->header($name, \implode(', ', $values));
         }
 
         foreach ($httpFoundationResponse->headers->getCookies() as $cookie) {
@@ -36,14 +33,15 @@ final class ResponseProcessor implements ResponseProcessorInterface
                 $cookie->getPath(),
                 $cookie->getDomain() ?? '',
                 $cookie->isSecure(),
-                $cookie->isHttpOnly()
+                $cookie->isHttpOnly(),
+                $cookie->getSameSite() ?? ''
             );
         }
 
         $swooleResponse->status($httpFoundationResponse->getStatusCode());
 
         if ($httpFoundationResponse instanceof BinaryFileResponse) {
-            $swooleResponse->sendfile($httpFoundationResponse->getFile()->getFilename());
+            $swooleResponse->sendfile($httpFoundationResponse->getFile()->getRealPath());
         } else {
             $swooleResponse->end($httpFoundationResponse->getContent());
         }

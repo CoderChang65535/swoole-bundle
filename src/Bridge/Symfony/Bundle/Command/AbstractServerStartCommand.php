@@ -25,21 +25,21 @@ use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 abstract class AbstractServerStartCommand extends Command
 {
+    /**
+     * @var ParameterBagInterface
+     */
     protected $parameterBag;
 
     private $server;
     private $bootManager;
     private $serverConfiguration;
     private $serverConfigurator;
-    private $testing = false;
 
     /**
-     * @param HttpServer              $server
-     * @param HttpServerConfiguration $serverConfiguration
-     * @param ConfiguratorInterface   $serverConfigurator
-     * @param ParameterBagInterface   $parameterBag
-     * @param BootableInterface       $bootManager
+     * @var bool
      */
+    private $testing = false;
+
     public function __construct(
         HttpServer $server,
         HttpServerConfiguration $serverConfiguration,
@@ -56,14 +56,9 @@ abstract class AbstractServerStartCommand extends Command
         parent::__construct();
     }
 
-    /**
-     * @throws \Assert\AssertionFailedException
-     *
-     * @return string
-     */
-    private function getDefaultPublicDir(): string
+    public function enableTestMode(): void
     {
-        return $this->serverConfiguration->hasPublicDir() ? $this->serverConfiguration->getPublicDir() : $this->parameterBag->get('kernel.project_dir').'/public';
+        $this->testing = true;
     }
 
     /**
@@ -83,44 +78,8 @@ abstract class AbstractServerStartCommand extends Command
             ->addOption('trusted-hosts', null, InputOption::VALUE_REQUIRED, 'Trusted hosts', $this->parameterBag->get('swoole.http_server.trusted_hosts'))
             ->addOption('trusted-proxies', null, InputOption::VALUE_REQUIRED, 'Trusted proxies', $this->parameterBag->get('swoole.http_server.trusted_proxies'))
             ->addOption('api', null, InputOption::VALUE_NONE, 'Enable API Server')
-            ->addOption('api-port', null, InputOption::VALUE_REQUIRED, 'Listen for API Server on this port', $this->parameterBag->get('swoole.http_server.api.port'));
-    }
-
-    private function ensureXdebugDisabled(SymfonyStyle $io): void
-    {
-        $xdebugHandler = new XdebugHandler();
-        if (!$xdebugHandler->shouldRestart()) {
-            return;
-        }
-
-        if ($xdebugHandler->canBeRestarted()) {
-            $restartedProcess = $xdebugHandler->prepareRestartedProcess();
-            $xdebugHandler->forwardSignals($restartedProcess);
-
-            $io->note('Restarting command without Xdebug..');
-            $io->comment(\sprintf(
-                "%s\n%s",
-                'Swoole is incompatible with Xdebug. Check https://github.com/swoole/swoole-src/issues/1681 for more information.',
-                \sprintf('Set environment variable "%s=1" to use it anyway.', $xdebugHandler->allowXdebugEnvName())
-            ));
-
-            if ($this->testing) {
-                return;
-            }
-
-            $restartedProcess->start();
-
-            foreach ($restartedProcess as $processOutput) {
-                echo $processOutput;
-            }
-
-            exit($restartedProcess->getExitCode());
-        }
-
-        $io->warning(\sprintf(
-            "Xdebug is enabled! Command could not be restarted automatically due to lack of \"pcntl\" extension.\nPlease either disable Xdebug or set environment variable \"%s=1\" to disable this message.",
-            $xdebugHandler->allowXdebugEnvName()
-        ));
+            ->addOption('api-port', null, InputOption::VALUE_REQUIRED, 'Listen for API Server on this port', $this->parameterBag->get('swoole.http_server.api.port'))
+        ;
     }
 
     /**
@@ -170,29 +129,17 @@ abstract class AbstractServerStartCommand extends Command
         return 0;
     }
 
-    private function makeSwooleHttpServer(): Server
-    {
-        $sockets = $this->serverConfiguration->getSockets();
-        $serverSocket = $sockets->getServerSocket();
-
-        return HttpServerFactory::make(
-            $serverSocket,
-            $this->serverConfiguration->getRunningMode(),
-            ...($sockets->hasApiSocket() ? [$sockets->getApiSocket()] : [])
-        );
-    }
-
     /**
-     * @param HttpServerConfiguration $serverConfiguration
-     * @param InputInterface          $input
-     *
      * @throws \Assert\AssertionFailedException
      */
     protected function prepareServerConfiguration(HttpServerConfiguration $serverConfiguration, InputInterface $input): void
     {
         $sockets = $serverConfiguration->getSockets();
 
+        /** @var string $port */
         $port = $input->getOption('port');
+
+        /** @var string $host */
         $host = $input->getOption('host');
 
         Assertion::numeric($port, 'Port must be a number.');
@@ -200,11 +147,13 @@ abstract class AbstractServerStartCommand extends Command
 
         $newServerSocket = $sockets->getServerSocket()
             ->withPort((int) $port)
-            ->withHost($host);
+            ->withHost($host)
+        ;
 
         $sockets->changeServerSocket($newServerSocket);
 
         if ((bool) $input->getOption('api') || $sockets->hasApiSocket()) {
+            /** @var string $apiPort */
             $apiPort = $input->getOption('api-port');
             Assertion::numeric($apiPort, 'Port must be a number.');
 
@@ -219,12 +168,7 @@ abstract class AbstractServerStartCommand extends Command
     }
 
     /**
-     * @param HttpServerConfiguration $serverConfiguration
-     * @param InputInterface          $input
-     *
      * @throws \Assert\AssertionFailedException
-     *
-     * @return array
      */
     protected function prepareRuntimeConfiguration(HttpServerConfiguration $serverConfiguration, InputInterface $input): array
     {
@@ -245,37 +189,10 @@ abstract class AbstractServerStartCommand extends Command
     }
 
     /**
-     * @param mixed $set
-     *
-     * @throws \Assert\AssertionFailedException
-     *
-     * @return array
-     */
-    private function decodeSet($set): array
-    {
-        if (\is_string($set)) {
-            return decode_string_as_set($set);
-        }
-
-        Assertion::isArray($set);
-
-        if (1 === \count($set)) {
-            return decode_string_as_set($set[0]);
-        }
-
-        return $set;
-    }
-
-    /**
      * Rows produced by this function will be printed on server startup in table with following form:
      * | Configuration | Value |.
      *
-     * @param HttpServerConfiguration $serverConfiguration
-     * @param array                   $runtimeConfiguration
-     *
      * @throws \Assert\AssertionFailedException
-     *
-     * @return array
      */
     protected function prepareConfigurationRowsToPrint(HttpServerConfiguration $serverConfiguration, array $runtimeConfiguration): array
     {
@@ -285,6 +202,8 @@ abstract class AbstractServerStartCommand extends Command
             ['running_mode', $serverConfiguration->getRunningMode()],
             ['worker_count', $serverConfiguration->getWorkerCount()],
             ['reactor_count', $serverConfiguration->getReactorCount()],
+            ['worker_max_request', $serverConfiguration->getMaxRequest()],
+            ['worker_max_request_grace', $serverConfiguration->getMaxRequestGrace()],
             ['memory_limit', format_bytes(get_max_memory())],
             ['trusted_hosts', \implode(', ', $runtimeConfiguration['trustedHosts'])],
         ];
@@ -303,10 +222,6 @@ abstract class AbstractServerStartCommand extends Command
     }
 
     /**
-     * @param HttpServerConfiguration $serverConfiguration
-     * @param HttpServer              $server
-     * @param SymfonyStyle            $io
-     *
      * @throws \Assert\AssertionFailedException
      */
     protected function startServer(HttpServerConfiguration $serverConfiguration, HttpServer $server, SymfonyStyle $io): void
@@ -321,8 +236,80 @@ abstract class AbstractServerStartCommand extends Command
         }
     }
 
-    public function enableTestMode(): void
+    /**
+     * @throws \Assert\AssertionFailedException
+     */
+    private function getDefaultPublicDir(): string
     {
-        $this->testing = true;
+        return $this->serverConfiguration->hasPublicDir() ? $this->serverConfiguration->getPublicDir() : $this->parameterBag->get('kernel.project_dir').'/public';
+    }
+
+    private function ensureXdebugDisabled(SymfonyStyle $io): void
+    {
+        $xdebugHandler = new XdebugHandler();
+        if (!$xdebugHandler->shouldRestart()) {
+            return;
+        }
+
+        if ($xdebugHandler->canBeRestarted()) {
+            $restartedProcess = $xdebugHandler->prepareRestartedProcess();
+            $xdebugHandler->forwardSignals($restartedProcess);
+
+            $io->note('Restarting command without Xdebug..');
+            $io->comment(\sprintf(
+                "%s\n%s",
+                'Swoole is incompatible with Xdebug. Check https://github.com/swoole/swoole-src/issues/1681 for more information.',
+                \sprintf('Set environment variable "%s=1" to use it anyway.', $xdebugHandler->allowXdebugEnvName())
+            ));
+
+            if ($this->testing) {
+                return;
+            }
+
+            $restartedProcess->start();
+
+            foreach ($restartedProcess as $processOutput) {
+                echo $processOutput;
+            }
+
+            exit($restartedProcess->getExitCode());
+        }
+
+        $io->warning(\sprintf(
+            "Xdebug is enabled! Command could not be restarted automatically due to lack of \"pcntl\" extension.\nPlease either disable Xdebug or set environment variable \"%s=1\" to disable this message.",
+            $xdebugHandler->allowXdebugEnvName()
+        ));
+    }
+
+    private function makeSwooleHttpServer(): Server
+    {
+        $sockets = $this->serverConfiguration->getSockets();
+        $serverSocket = $sockets->getServerSocket();
+
+        return HttpServerFactory::make(
+            $serverSocket,
+            $this->serverConfiguration->getRunningMode(),
+            ...($sockets->hasApiSocket() ? [$sockets->getApiSocket()] : [])
+        );
+    }
+
+    /**
+     * @param mixed $set
+     *
+     * @throws \Assert\AssertionFailedException
+     */
+    private function decodeSet($set): array
+    {
+        if (\is_string($set)) {
+            return decode_string_as_set($set);
+        }
+
+        Assertion::isArray($set);
+
+        if (1 === \count($set)) {
+            return decode_string_as_set($set[0]);
+        }
+
+        return $set;
     }
 }

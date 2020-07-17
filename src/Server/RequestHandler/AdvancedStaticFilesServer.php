@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace K911\Swoole\Server\RequestHandler;
 
+use Assert\AssertionFailedException;
 use K911\Swoole\Server\HttpServerConfiguration;
 use K911\Swoole\Server\Runtime\BootableInterface;
 use RuntimeException;
@@ -19,18 +20,23 @@ use Swoole\Http\Response;
  */
 final class AdvancedStaticFilesServer implements RequestHandlerInterface, BootableInterface
 {
+    private const MIME_TYPE_APPLICATION_OCTET_STREAM = 'application/octet-stream';
+
     /**
      * Default static file extensions supported.
      *
      * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Complete_list_of_MIME_types
      */
-    private const FILE_EXTENSION_MIME_TYPE_MAP = [
+    private const FILE_EXTENSION_MIME_TYPE_DEFAULT_MAP = [
+        // fallback for other file types
+        '*' => self::MIME_TYPE_APPLICATION_OCTET_STREAM,
+        // default list
         '7z' => 'application/x-7z-compressed',
         'aac' => 'audio/aac',
-        'arc' => 'application/octet-stream',
+        'arc' => self::MIME_TYPE_APPLICATION_OCTET_STREAM,
         'avi' => 'video/x-msvideo',
         'azw' => 'application/vnd.amazon.ebook',
-        'bin' => 'application/octet-stream',
+        'bin' => self::MIME_TYPE_APPLICATION_OCTET_STREAM,
         'bmp' => 'image/bmp',
         'bz' => 'application/x-bzip',
         'bz2' => 'application/x-bzip2',
@@ -87,25 +93,38 @@ final class AdvancedStaticFilesServer implements RequestHandlerInterface, Bootab
     ];
 
     private $decorated;
-    private $cachedMimeTypes;
     private $configuration;
+
+    /**
+     * @var array<string,string>
+     */
+    private $cachedMimeTypes;
 
     /**
      * @var string
      */
     private $publicDir;
 
-    public function __construct(RequestHandlerInterface $decorated, HttpServerConfiguration $configuration)
-    {
+    /**
+     * @var array
+     */
+    private $fileExtensionMimeTypeMap;
+
+    public function __construct(
+        RequestHandlerInterface $decorated,
+        HttpServerConfiguration $configuration,
+        array $customMimeTypes = []
+    ) {
         $this->decorated = $decorated;
-        $this->cachedMimeTypes = [];
         $this->configuration = $configuration;
+        $this->fileExtensionMimeTypeMap = \array_merge(self::FILE_EXTENSION_MIME_TYPE_DEFAULT_MAP, $customMimeTypes);
+        $this->cachedMimeTypes = [];
     }
 
     /**
      * {@inheritdoc}
      *
-     * @throws \Assert\AssertionFailedException
+     * @throws AssertionFailedException
      */
     public function boot(array $runtimeConfiguration = []): void
     {
@@ -143,15 +162,15 @@ final class AdvancedStaticFilesServer implements RequestHandlerInterface, Bootab
             $extension = \pathinfo(\pathinfo($path, PATHINFO_FILENAME), PATHINFO_EXTENSION);
         }
 
-        if (!isset(self::FILE_EXTENSION_MIME_TYPE_MAP[$extension])) {
+        if (!\file_exists($path) || \is_dir($path)) {
             return false;
         }
 
-        if (!\file_exists($path)) {
-            return false;
+        if (!isset($this->fileExtensionMimeTypeMap[$extension])) {
+            $extension = '*';
         }
 
-        $this->cachedMimeTypes[$path] = self::FILE_EXTENSION_MIME_TYPE_MAP[$extension];
+        $this->cachedMimeTypes[$path] = $this->fileExtensionMimeTypeMap[$extension];
 
         return true;
     }

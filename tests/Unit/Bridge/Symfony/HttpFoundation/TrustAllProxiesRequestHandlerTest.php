@@ -14,6 +14,7 @@ use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
 
 class TrustAllProxiesRequestHandlerTest extends TestCase
 {
+    use \Prophecy\PhpUnit\ProphecyTrait;
     /**
      * @var ObjectProphecy|RequestHandlerInterface
      */
@@ -53,10 +54,6 @@ class TrustAllProxiesRequestHandlerTest extends TestCase
 
     /**
      * @dataProvider trustOrNotProvider
-     *
-     * @param bool  $startWith
-     * @param array $bootWith
-     * @param bool  $expected
      */
     public function testBooting(bool $startWith, array $bootWith, bool $expected): void
     {

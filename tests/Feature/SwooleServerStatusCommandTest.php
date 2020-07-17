@@ -11,10 +11,13 @@ use Symfony\Component\Console\Tester\CommandTester;
 
 final class SwooleServerStatusCommandTest extends ServerTestCase
 {
-    public function testCheckServerStatusViaProcess(): void
+    protected function setUp(): void
     {
         $this->markTestSkippedIfXdebugEnabled();
+    }
 
+    public function testCheckServerStatusViaProcess(): void
+    {
         $serverStart = $this->createConsoleProcess([
             'swoole:server:start',
             '--host=localhost',
@@ -28,7 +31,7 @@ final class SwooleServerStatusCommandTest extends ServerTestCase
 
         $this->assertProcessSucceeded($serverStart);
 
-        $this->goAndWait(function (): void {
+        $this->runAsCoroutineAndWait(function (): void {
             $this->deferServerStop();
 
             $client = HttpClient::fromDomain('localhost', 9999, false);
@@ -56,8 +59,6 @@ final class SwooleServerStatusCommandTest extends ServerTestCase
 
     public function testCheckServerStatusViaCommandTester(): void
     {
-        $this->markTestSkippedIfXdebugEnabled();
-
         $serverStart = $this->createConsoleProcess([
             'swoole:server:start',
             '--host=localhost',
@@ -76,7 +77,7 @@ final class SwooleServerStatusCommandTest extends ServerTestCase
         $command = $application->find('swoole:server:status');
         $commandTester = new CommandTester($command);
 
-        $this->goAndWait(function () use ($commandTester): void {
+        $this->runAsCoroutineAndWait(function () use ($commandTester): void {
             $this->deferServerStop();
 
             $client = HttpClient::fromDomain('localhost', 9999, false);
@@ -89,19 +90,19 @@ final class SwooleServerStatusCommandTest extends ServerTestCase
             ]);
 
             $this->assertSame(0, $commandTester->getStatusCode());
-            $this->assertStringContainsString('Fetched status', $commandTester->getDisplay());
-            $this->assertStringContainsString('Fetched metrics', $commandTester->getDisplay());
-            $this->assertStringContainsString('Listener[0] Host', $commandTester->getDisplay());
-            $this->assertStringContainsString('Requests', $commandTester->getDisplay());
-
             $this->assertHelloWorldRequestSucceeded($client);
         });
+
+        $output = $commandTester->getDisplay();
+
+        $this->assertStringContainsString('Fetched status', $output);
+        $this->assertStringContainsString('Fetched metrics', $output);
+        $this->assertStringContainsString('Listener[0] Host', $output);
+        $this->assertStringContainsString('Requests', $output);
     }
 
     public function testCheckServerStatusFailWhenServerNotRunning(): void
     {
-        $this->markTestSkippedIfXdebugEnabled();
-
         $kernel = static::createKernel();
         $application = new Application($kernel);
         $command = $application->find('swoole:server:status');

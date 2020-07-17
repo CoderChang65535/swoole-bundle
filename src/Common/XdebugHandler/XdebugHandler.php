@@ -39,29 +39,9 @@ final class XdebugHandler
         return \extension_loaded('pcntl');
     }
 
-    private function isAllowed(): bool
-    {
-        return false !== \getenv($this->allowXdebugEnvName);
-    }
-
     public function allowXdebugEnvName(): string
     {
         return $this->allowXdebugEnvName;
-    }
-
-    private function prepareEnvs(): array
-    {
-        $envs = [];
-        $lines = \getenv('LINES');
-        $columns = \getenv('COLUMNS');
-        if (false !== $lines) {
-            $envs['LINES'] = $lines;
-        }
-        if (false !== $columns) {
-            $envs['COLUMNS'] = $columns;
-        }
-
-        return $envs;
     }
 
     public function prepareRestartedProcess(): Process
@@ -90,6 +70,26 @@ final class XdebugHandler
         }
     }
 
+    private function isAllowed(): bool
+    {
+        return false !== \getenv($this->allowXdebugEnvName);
+    }
+
+    private function prepareEnvs(): array
+    {
+        $envs = [];
+        $lines = \getenv('LINES');
+        $columns = \getenv('COLUMNS');
+        if (false !== $lines) {
+            $envs['LINES'] = $lines;
+        }
+        if (false !== $columns) {
+            $envs['COLUMNS'] = $columns;
+        }
+
+        return $envs;
+    }
+
     private function createPreparedTempIniFile(): string
     {
         $tempIniFilePath = \tempnam(\sys_get_temp_dir(), '');
@@ -113,7 +113,12 @@ final class XdebugHandler
             yield $loadedIniFile;
         }
 
-        foreach (\explode(',', \php_ini_scanned_files()) as $scanned) {
+        $files = \php_ini_scanned_files();
+        if (false === $files) {
+            $files = '';
+        }
+
+        foreach (\explode(',', $files) as $scanned) {
             $preparedScanned = \trim($scanned);
 
             if ('' !== $preparedScanned) {
@@ -130,10 +135,7 @@ final class XdebugHandler
         foreach ($iniFiles as $iniFile) {
             $iniContent = \file_get_contents($iniFile);
             if (false === $iniContent) {
-                throw new RuntimeException(\sprintf(
-                    'Could not get contents of ini file "%s".',
-                    $iniFile
-                ));
+                throw new RuntimeException(\sprintf('Could not get contents of ini file "%s".', $iniFile));
             }
 
             $data = \preg_replace($regex, ';$1', $iniContent);
@@ -143,6 +145,9 @@ final class XdebugHandler
         // Merge loaded settings into our ini content, if it is valid
         if ($config = \parse_ini_string($content)) {
             $loaded = \ini_get_all(null, false);
+            if (false === $loaded) {
+                $loaded = [];
+            }
             $content .= $this->mergeLoadedConfig($loaded, $config);
         }
 
@@ -157,8 +162,6 @@ final class XdebugHandler
      *
      * @param array $loadedConfig All current ini settings
      * @param array $iniConfig    Settings from user ini files
-     *
-     * @return string
      */
     private function mergeLoadedConfig(array $loadedConfig, array $iniConfig): string
     {

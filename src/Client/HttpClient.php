@@ -17,7 +17,7 @@ use Swoole\Coroutine\Http\Client;
  *
  * @internal Class API is not stable, nor it is guaranteed to exists in next releases, use at own risk
  */
-final class HttpClient
+final class HttpClient implements \Serializable
 {
     private const SUPPORTED_HTTP_METHODS = [
         Http::METHOD_GET,
@@ -60,15 +60,7 @@ final class HttpClient
 
     public static function fromDomain(string $host, int $port = 443, bool $ssl = true, array $options = []): self
     {
-        $client = new Client(
-            $host, $port, $ssl
-        );
-
-        if (!empty($options)) {
-            $client->set($options);
-        }
-
-        return new self($client);
+        return new self(self::makeSwooleClient($host, $port, $ssl, $options));
     }
 
     /**
@@ -99,13 +91,17 @@ final class HttpClient
         return false;
     }
 
+    /**
+     * @param null|mixed $data
+     *
+     * @return array<string, array<string, mixed>>
+     */
     public function send(string $path, string $method = Http::METHOD_GET, array $headers = [], $data = null, int $timeout = 3): array
     {
         $this->assertHttpMethodSupported($method);
 
         $this->client->setMethod($method);
         $this->client->setHeaders($headers);
-        $this->client->execute($path);
 
         if (null !== $data) {
             if (\is_string($data)) {
@@ -115,7 +111,46 @@ final class HttpClient
             }
         }
 
+        $this->client->execute($path);
+
         return $this->resolveResponse($this->client, $timeout);
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function serialize(): string
+    {
+        return \json_encode([
+            'host' => $this->client->host,
+            'port' => $this->client->port,
+            'ssl' => $this->client->ssl,
+            'options' => $this->client->setting,
+        ], \JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * {@inheritdoc}
+     *
+     * @param string $serialized
+     */
+    public function unserialize($serialized): void
+    {
+        $spec = \json_decode($serialized, true, 512, \JSON_THROW_ON_ERROR);
+        $this->client = self::makeSwooleClient($spec['host'], $spec['port'], $spec['ssl'], $spec['options']);
+    }
+
+    private static function makeSwooleClient(string $host, int $port = 443, bool $ssl = true, array $options = []): Client
+    {
+        $client = new Client(
+            $host, $port, $ssl
+        );
+
+        if (!empty($options)) {
+            $client->set($options);
+        }
+
+        return $client;
     }
 
     private function assertHttpMethodSupported(string $method): void
@@ -127,17 +162,13 @@ final class HttpClient
         throw UnsupportedHttpMethodException::forMethod($method, self::SUPPORTED_HTTP_METHODS);
     }
 
+    /**
+     * @param mixed $data
+     */
     private function serializeRequestData(Client $client, $data): void
     {
-        $options = \defined('JSON_THROW_ON_ERROR') ? \JSON_THROW_ON_ERROR : 0;
-        $json = \json_encode($data, $options);
-
-        // TODO: Drop on PHP 7.3 Migration
-        if (!\defined('JSON_THROW_ON_ERROR') && false === $json) {
-            throw new \RuntimeException(\json_last_error_msg(), \json_last_error());
-        }
-
-        $client->headers[Http::HEADER_CONTENT_TYPE] = Http::CONTENT_TYPE_APPLICATION_JSON;
+        $json = \json_encode($data, \JSON_THROW_ON_ERROR);
+        $client->requestHeaders[Http::HEADER_CONTENT_TYPE] = Http::CONTENT_TYPE_APPLICATION_JSON;
         $client->setData($json);
     }
 
@@ -184,9 +215,7 @@ final class HttpClient
     }
 
     /**
-     * @param Client $client
-     *
-     * @return string|array
+     * @return array|string
      */
     private function resolveResponseBody(Client $client)
     {
@@ -200,17 +229,7 @@ final class HttpClient
 
         switch ($contentType) {
             case Http::CONTENT_TYPE_APPLICATION_JSON:
-                // TODO: Drop on PHP 7.3 Migration
-                if (!\defined('JSON_THROW_ON_ERROR')) {
-                    $data = \json_decode($client->body, true);
-                    if (null === $data) {
-                        throw new \RuntimeException(\json_last_error_msg(), \json_last_error());
-                    }
-
-                    return $data;
-                }
-
-                return \json_decode($client->body, true, 512, JSON_THROW_ON_ERROR);
+                return \json_decode($client->body, true, 512, \JSON_THROW_ON_ERROR);
             case Http::CONTENT_TYPE_TEXT_PLAIN:
             case Http::CONTENT_TYPE_TEXT_HTML:
                 return $client->body;

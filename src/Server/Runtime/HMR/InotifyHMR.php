@@ -32,8 +32,6 @@ final class InotifyHMR implements HotModuleReloaderInterface, BootableInterface
     private $watchMask;
 
     /**
-     * @param array $nonReloadableFiles
-     *
      * @throws AssertionFailedException
      */
     public function __construct(array $nonReloadableFiles = [])
@@ -44,35 +42,15 @@ final class InotifyHMR implements HotModuleReloaderInterface, BootableInterface
         $this->setNonReloadableFiles($nonReloadableFiles);
     }
 
-    /**
-     * @param string[] $nonReloadableFiles files
-     *
-     * @throws AssertionFailedException
-     */
-    private function setNonReloadableFiles(array $nonReloadableFiles): void
+    public function __destruct()
     {
-        foreach ($nonReloadableFiles as $nonReloadableFile) {
-            Assertion::file($nonReloadableFile);
-            $this->nonReloadableFiles[$nonReloadableFile] = true;
-        }
-    }
-
-    /**
-     * @param array $files
-     */
-    private function watchFiles(array $files): void
-    {
-        foreach ($files as $file) {
-            if (!isset($this->nonReloadableFiles[$file]) && !isset($this->watchedFiles[$file])) {
-                $this->watchedFiles[$file] = \inotify_add_watch($this->inotify, $file, $this->watchMask);
-            }
+        if (null !== $this->inotify) {
+            \fclose($this->inotify);
         }
     }
 
     /**
      * {@inheritdoc}
-     *
-     * @param Server $server
      */
     public function tick(Server $server): void
     {
@@ -101,21 +79,36 @@ final class InotifyHMR implements HotModuleReloaderInterface, BootableInterface
         $this->initializeInotify();
     }
 
-    private function initializeInotify(): void
-    {
-        $this->inotify = \inotify_init();
-        \stream_set_blocking($this->inotify, false);
-    }
-
     public function getNonReloadableFiles(): array
     {
         return \array_keys($this->nonReloadableFiles);
     }
 
-    public function __destruct()
+    /**
+     * @param string[] $nonReloadableFiles files
+     *
+     * @throws AssertionFailedException
+     */
+    private function setNonReloadableFiles(array $nonReloadableFiles): void
     {
-        if (null !== $this->inotify) {
-            \fclose($this->inotify);
+        foreach ($nonReloadableFiles as $nonReloadableFile) {
+            Assertion::file($nonReloadableFile);
+            $this->nonReloadableFiles[$nonReloadableFile] = true;
         }
+    }
+
+    private function watchFiles(array $files): void
+    {
+        foreach ($files as $file) {
+            if (!isset($this->nonReloadableFiles[$file]) && !isset($this->watchedFiles[$file])) {
+                $this->watchedFiles[$file] = \inotify_add_watch($this->inotify, $file, $this->watchMask);
+            }
+        }
+    }
+
+    private function initializeInotify(): void
+    {
+        $this->inotify = \inotify_init();
+        \stream_set_blocking($this->inotify, false);
     }
 }

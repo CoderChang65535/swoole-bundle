@@ -42,7 +42,8 @@ final class ServerStatusCommand extends Command
     {
         $this->setDescription('Get current status of the Swoole HTTP Server by querying running API Server.')
             ->addOption('api-host', null, InputOption::VALUE_REQUIRED, 'API Server listens on this host.', $this->parameterBag->get('swoole.http_server.api.host'))
-            ->addOption('api-port', null, InputOption::VALUE_REQUIRED, 'API Server listens on this port.', $this->parameterBag->get('swoole.http_server.api.port'));
+            ->addOption('api-port', null, InputOption::VALUE_REQUIRED, 'API Server listens on this port.', $this->parameterBag->get('swoole.http_server.api.port'))
+        ;
     }
 
     /**
@@ -60,12 +61,14 @@ final class ServerStatusCommand extends Command
 
         $coroutinePool = CoroutinePool::fromCoroutines(function () use ($io): void {
             $status = $this->apiServerClientFactory->newClient()
-                ->status();
+                ->status()
+            ;
             $io->success('Fetched status');
             $this->showStatus($io, $status);
         }, function () use ($io): void {
             $metrics = $this->apiServerClientFactory->newClient()
-                ->metrics();
+                ->metrics()
+            ;
             $io->success('Fetched metrics');
             $this->showMetrics($io, $metrics);
         });
@@ -78,6 +81,23 @@ final class ServerStatusCommand extends Command
         }
 
         return $exitCode;
+    }
+
+    /**
+     * @throws \Assert\AssertionFailedException
+     */
+    protected function prepareClientConfiguration(InputInterface $input): void
+    {
+        /** @var string $host */
+        $host = $input->getOption('api-host');
+
+        /** @var string $port */
+        $port = $input->getOption('api-port');
+
+        Assertion::numeric($port, 'Port must be a number.');
+        Assertion::string($host, 'Host must be a string.');
+
+        $this->sockets->changeApiSocket(new Socket($host, (int) $port));
     }
 
     private function showStatus(SymfonyStyle $io, array $status): void
@@ -123,24 +143,11 @@ final class ServerStatusCommand extends Command
             ['Active connections', $server['connection_num'], '1'],
             ['Accepted connections', $server['accept_count'], '1'],
             ['Closed connections', $server['close_count'], '1'],
+            ['All workers', $workers, '1'],
             ['Active workers', $activeWorkers, '1'],
             ['Idle workers', $idleWorkers, '1'],
+            ['Running coroutines', $server['coroutine_num'], '1'],
+            ['Tasks in queue', $server['tasking_num'], '1'],
         ]);
-    }
-
-    /**
-     * @param InputInterface $input
-     *
-     * @throws \Assert\AssertionFailedException
-     */
-    protected function prepareClientConfiguration(InputInterface $input): void
-    {
-        $host = $input->getOption('api-host');
-        $port = $input->getOption('api-port');
-
-        Assertion::numeric($port, 'Port must be a number.');
-        Assertion::string($host, 'Host must be a string.');
-
-        $this->sockets->changeApiSocket(new Socket($host, (int) $port));
     }
 }

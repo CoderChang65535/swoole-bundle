@@ -13,6 +13,7 @@ use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
 use Symfony\Bundle\MonologBundle\MonologBundle;
 use Symfony\Bundle\TwigBundle\TwigBundle;
+use Symfony\Bundle\WebProfilerBundle\WebProfilerBundle;
 use Symfony\Component\Config\Loader\LoaderInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\HttpKernel\Kernel;
@@ -26,6 +27,8 @@ class TestAppKernel extends Kernel
 
     private $coverageEnabled;
 
+    private $profilerEnabled = false;
+
     public function __construct(string $environment, bool $debug)
     {
         if ('_cov' === \mb_substr($environment, -4, 4)) {
@@ -35,6 +38,10 @@ class TestAppKernel extends Kernel
             $this->coverageEnabled = true;
         } else {
             $this->coverageEnabled = false;
+        }
+
+        if ('profiler' === $environment) {
+            $this->profilerEnabled = true;
         }
 
         parent::__construct($environment, $debug);
@@ -70,16 +77,34 @@ class TestAppKernel extends Kernel
         if ($this->coverageEnabled) {
             yield new CoverageBundle();
         }
+
+        if ($this->profilerEnabled) {
+            yield new WebProfilerBundle();
+        }
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    public function getProjectDir(): string
+    {
+        return __DIR__.'/app';
     }
 
     /**
      * {@inheritdoc}
      *
-     * @throws \Symfony\Component\Config\Exception\FileLoaderLoadException
+     * @throws \Symfony\Component\Config\Exception\LoaderLoadException
      */
     protected function configureRoutes(RouteCollectionBuilder $routes): void
     {
-        $routes->import('app/routing.yml');
+        $routes->import($this->getProjectDir().'/routing.yml');
+
+        $envRoutingFile = $this->getProjectDir().'/config/'.$this->environment.'/routing/routing.yaml';
+
+        if (\file_exists($envRoutingFile)) {
+            $routes->import($envRoutingFile);
+        }
     }
 
     /**
@@ -92,9 +117,10 @@ class TestAppKernel extends Kernel
         $c->setParameter('bundle.root_dir', \dirname(__DIR__, 3));
 
         $confDir = $this->getProjectDir().'/config';
+
         $loader->load($confDir.'/*'.self::CONFIG_EXTENSIONS, 'glob');
         if (\is_dir($confDir.'/'.$this->environment)) {
-            $loader->load($confDir.'/'.$this->environment.'/**/*'.self::CONFIG_EXTENSIONS, 'glob');
+            $loader->load($confDir.'/'.$this->environment.'/*'.self::CONFIG_EXTENSIONS, 'glob');
         }
 
         if ($this->coverageEnabled && 'cov' !== $this->environment) {
@@ -105,13 +131,5 @@ class TestAppKernel extends Kernel
     private function getVarDir(): string
     {
         return $this->getProjectDir().'/var';
-    }
-
-    /**
-     * {@inheritdoc}
-     */
-    public function getProjectDir(): string
-    {
-        return __DIR__.'/app';
     }
 }

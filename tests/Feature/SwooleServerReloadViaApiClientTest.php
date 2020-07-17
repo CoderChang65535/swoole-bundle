@@ -18,13 +18,19 @@ final class SwooleServerReloadViaApiClientTest extends ServerTestCase
     private const CONTROLLER_TEMPLATE_SRC = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php.tmpl';
     private const CONTROLLER_TEMPLATE_DEST = __DIR__.'/../Fixtures/Symfony/TestBundle/Controller/ReplacedContentTestController.php';
 
+    protected function setUp(): void
+    {
+        $this->markTestSkippedIfXdebugEnabled();
+    }
+
     public function testStartRequestApiToReloadCallStop(): void
     {
         static::bootKernel();
         $sockets = static::$container->get(Sockets::class);
         $sockets->changeApiSocket(new Socket('0.0.0.0', 9998));
         $apiClient = static::$container->get(ApiServerClientFactory::class)
-            ->newClient();
+            ->newClient()
+        ;
 
         $serverStart = $this->createConsoleProcess([
             'swoole:server:start',
@@ -34,15 +40,12 @@ final class SwooleServerReloadViaApiClientTest extends ServerTestCase
             '--api-port=9998',
         ]);
 
-        if (self::coverageEnabled()) {
-            $serverStart->disableOutput();
-        }
         $serverStart->setTimeout(3);
         $serverStart->run();
 
         $this->assertTrue($serverStart->isSuccessful());
 
-        $this->goAndWait(function () use ($apiClient): void {
+        $this->runAsCoroutineAndWait(function () use ($apiClient): void {
             $this->deferServerStop();
             $this->deferRestoreOriginalTemplateControllerResponse();
 
@@ -77,7 +80,8 @@ final class SwooleServerReloadViaApiClientTest extends ServerTestCase
     {
         static::bootKernel(['environment' => 'api']);
         $apiClient = static::$container->get(ApiServerClientFactory::class)
-            ->newClient();
+            ->newClient()
+        ;
 
         $serverStart = $this->createConsoleProcess([
             'swoole:server:start',
@@ -85,15 +89,12 @@ final class SwooleServerReloadViaApiClientTest extends ServerTestCase
             '--port=9999',
         ], ['APP_ENV' => 'api']);
 
-        if (self::coverageEnabled()) {
-            $serverStart->disableOutput();
-        }
         $serverStart->setTimeout(3);
         $serverStart->run();
 
         $this->assertTrue($serverStart->isSuccessful());
 
-        $this->goAndWait(function () use ($apiClient): void {
+        $this->runAsCoroutineAndWait(function () use ($apiClient): void {
             $this->deferServerStop();
             $this->deferRestoreOriginalTemplateControllerResponse();
 

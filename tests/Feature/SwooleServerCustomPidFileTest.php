@@ -7,10 +7,12 @@ namespace K911\Swoole\Tests\Feature;
 use K911\Swoole\Client\HttpClient;
 use K911\Swoole\Tests\Fixtures\Symfony\TestBundle\Test\ServerTestCase;
 
-final class SwooleCustomPidFileTest extends ServerTestCase
+final class SwooleServerCustomPidFileTest extends ServerTestCase
 {
     public function testStartServerOnCustomPidFileLocation(): void
     {
+        $this->markTestSkippedIfXdebugEnabled();
+
         $pidFile = $this->generateNotExistingCustomPidFile();
 
         $serverStart = $this->createConsoleProcess([
@@ -20,14 +22,14 @@ final class SwooleCustomPidFileTest extends ServerTestCase
             \sprintf('--pid-file=%s', $pidFile),
         ]);
 
-        $this->assertFileNotExists($pidFile);
+        $this->assertFileDoesNotExist($pidFile);
 
         $serverStart->setTimeout(3);
         $serverStart->run();
 
         $this->assertProcessSucceeded($serverStart);
 
-        $this->goAndWait(function () use ($pidFile): void {
+        $this->runAsCoroutineAndWait(function () use ($pidFile): void {
             $this->deferServerStop(\sprintf('--pid-file=%s', $pidFile));
 
             $client = HttpClient::fromDomain('localhost', 9999, false);
@@ -52,7 +54,7 @@ final class SwooleCustomPidFileTest extends ServerTestCase
         ]);
 
         $this->assertFileExists($pidFile);
-        $this->assertFileNotIsWritable($pidFile);
+        $this->assertFileIsNotWritable($pidFile);
 
         $serverStart->setTimeout(3);
         $serverStart->run();
